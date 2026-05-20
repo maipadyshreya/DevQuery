@@ -8,7 +8,7 @@ The app asks software engineering interview questions, allows users to submit an
 
 pip install streamlit pandas openai python-dotenv
 
-## Create a .env file and add your NVIDIA API key:
+Create a .env file and add your NVIDIA API key:
 
 NVIDIA_API_KEY=your_api_key_here
 
