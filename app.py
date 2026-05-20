@@ -1,14 +1,23 @@
+from re import match
+
 import streamlit as st
 import pandas as pd
-from sentence_transformers import SentenceTransformer, util
+from openai import OpenAI
+import os
+from dotenv import load_dotenv
+from sympy import re
+import re
 
-# cache model so only loads once
-@st.cache_resource
-def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+# Load environment variables
+load_dotenv()
 
-#load cached model
-model = load_model()
+# OpenRouter API
+client = OpenAI(
+     base_url = "https://integrate.api.nvidia.com/v1",
+     #remove for final 
+     api_key=os.getenv("NVIDIA_API_KEY")
+     )
+
 
 #read the file with question and answers
 df = pd.read_csv("questions.csv", encoding="latin1")
@@ -19,7 +28,7 @@ df = df.dropna()
 st.title("AI Software Engineering Interviewer")
 st.write("This app asks software interview questions and scores your answer.")
 
-#Dropdown to seelct category in dataset
+#Dropdown to select category in dataset
 category = st.selectbox("Choose a topic:", df["Category"].unique())
 
 #filter the dataset based on the selected category
@@ -49,14 +58,52 @@ st.write(question)
 #text area for user to type their answer
 user_answer = st.text_area("Type your answer here:")
 
-#
-def calculate_score(correct_answer, user_answer):
-    correct_embedding = model.encode(correct_answer, convert_to_tensor=True)
-    user_embedding = model.encode(user_answer, convert_to_tensor=True)
-    similarity = util.cos_sim(correct_embedding, user_embedding).item()
-    # FIX 3: Clamp score to 0-100 (cosine similarity can be slightly negative)
-    score = round(max(0, similarity) * 100, 2)
-    return score
+# LLM grading function
+def calculate_score(question, user_answer):
+
+    prompt = f"""
+You are a very lenient software engineering interviewer.
+
+Grade the candidate's answer from 0 to 100.
+
+Rules:
+- Give 100 if the answer is factually correct.
+- Do not require the answer to match any expected wording.
+- Do not remove points for being brief.
+- Only give below 100 if the answer is incorrect, unclear, or missing the main concept.
+
+Interview Question:
+{question}
+
+Candidate Answer:
+{user_answer}
+
+Return ONLY one number.
+"""
+
+    response = client.chat.completions.create(
+        model="meta/llama-3.1-8b-instruct",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0
+    )
+
+    score_text = response.choices[0].message.content.strip()
+
+    match = re.search(r"\d+(\.\d+)?", score_text)
+
+    if match:
+         score = float(match.group())
+    else:
+     score = 0
+
+    return round(score, 2)
+
+
 
 #submit answer button
 if st.button("Submit Answer"):
@@ -65,12 +112,11 @@ if st.button("Submit Answer"):
         st.warning("Please type an answer first.")
     else:
         #Calculate the similarity score between the correct answer and the user's answer
-        score = calculate_score(correct_answer, user_answer)
+        score = calculate_score(question, user_answer)
 
         #Display the score and feedback
         st.subheader("Your Score")
-        st.metric(label="Similarity Score", value=f"{score}/100")  # FIX 4: nicer display
-
+        st.metric(label="LLM Score", value=f"{score}/100")
         #Provide feedback based on the score
         if score >= 75:
             st.success("Good answer! You explained the concept well.")
